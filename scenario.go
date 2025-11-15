@@ -2,34 +2,45 @@ package scenario
 
 import (
 	"context"
-	tele "gopkg.in/telebot.v3"
+	"errors"
+	"fmt"
 	"time"
+
+	tele "gopkg.in/telebot.v3"
 )
 
+var (
+	ErrSessionNotFound = errors.New("session not found")
+	ErrSceneNotFound   = errors.New("scene not found")
+)
+
+// SceneName .
+type SceneName string
+
 // Handler is a function to process updates inside a scene.
-type Handler func(*Ctx) error
+type Handler func(*Context) error
 
 // Scene defines a simple lifecycle similar to grammy scenes.
 type Scene interface {
-	Name() string
-	Enter(*Ctx, ...any) error
-	OnUpdate(*Ctx) error
-	Leave(*Ctx) error
+	Name() SceneName
+	Enter(*Context) error
+	OnUpdate(*Context) error
+	Leave(*Context) error
 }
 
 // Scenario routes updates to scenes, stores session and current scene.
 type Scenario struct {
 	bot    *tele.Bot
 	store  Store
-	scenes map[string]Scene
+	scenes map[SceneName]Scene
 }
 
-// NewScenario .
-func NewScenario(bot *tele.Bot) *Scenario {
+// New .
+func New(bot *tele.Bot) *Scenario {
 	return &Scenario{
 		bot:    bot,
 		store:  newMemoryStore(),
-		scenes: make(map[string]Scene),
+		scenes: make(map[SceneName]Scene),
 	}
 }
 
@@ -57,18 +68,25 @@ func (s *Scenario) Middleware(next tele.HandlerFunc) tele.HandlerFunc {
 		if m := c.Message(); m != nil && m.Chat != nil {
 			cid = m.Chat.ID
 		}
-		sess := s.store.GetSession(ctx, cid, uid)
-		scName := s.store.GetScene(ctx, cid, uid)
-		sc, ok := s.scenes[scName]
+
+		sess, err := s.store.GetSession(ctx, cid, uid)
+		if err != nil && !errors.Is(err, ErrSessionNotFound) {
+			return err
+		}
+
+		sc, ok := s.scenes[sess.Scene]
 		sceneCtx := newCtx(s, c, sess)
 
 		if ok && sc != nil {
 			// Dispatch to current scene
-			if err := sc.OnUpdate(sceneCtx); err != nil {
+			if err = sc.OnUpdate(sceneCtx); err != nil {
 				return err
 			}
 			// persist session changes after each handled update
-			s.store.SetSession(ctx, cid, uid, sceneCtx.Session)
+			err = s.store.SetSession(ctx, sceneCtx.Session)
+			if err != nil {
+				return fmt.Errorf("store.SetSession: %w", err)
+			}
 			return nil
 		}
 
@@ -78,35 +96,53 @@ func (s *Scenario) Middleware(next tele.HandlerFunc) tele.HandlerFunc {
 }
 
 // enter sets current scene and calls Enter.
-func (s *Scenario) enter(c *Ctx, scene string, args ...any) error {
+func (s *Scenario) enter(c *Context, scene SceneName) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	s.store.SetScene(ctx, c.chatID, c.userID, scene)
-	if sc, ok := s.scenes[scene]; ok {
-		if err := sc.Enter(c, args...); err != nil {
-			return err
-		}
-		// persist session right after enter (e.g., __step = 0)
-		s.store.SetSession(ctx, c.chatID, c.userID, c.Session)
+	sc, ok := s.scenes[scene]
+	if !ok {
 		return nil
 	}
+
+	if err := sc.Enter(c); err != nil {
+		return err
+	}
+
+	c.Session.Scene = scene
+	err := s.store.SetSession(ctx, c.Session)
+	if err != nil {
+		return fmt.Errorf("store.SetSession: %w", err)
+	}
+
+	// Immediately trigger the first step to send initial message
+	if err = sc.OnUpdate(c); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 // leave clears current scene and calls Leave if any.
-func (s *Scenario) leave(userID, chatID int64) {
+func (s *Scenario) leave(c *Context) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	scName := s.store.GetScene(ctx, chatID, userID)
-	if sc, ok := s.scenes[scName]; ok {
-		_ = sc.Leave(&Ctx{Context: s.bot.NewContext(tele.Update{}), Stage: s})
+	sc, ok := s.scenes[c.Session.Scene]
+	if !ok {
+		return ErrSceneNotFound
 	}
 
-	s.store.RemoveScene(ctx, chatID, userID)
-}
+	err := sc.Leave(c)
+	if err != nil {
+		return fmt.Errorf("sc.Leave: %w", err)
+	}
 
-func (s *Scenario) currentScene(ctx context.Context, userID, chatID int64) string {
-	return s.store.GetScene(ctx, chatID, userID)
+	c.Session.Scene = ""
+	err = s.store.SetSession(ctx, c.Session)
+	if err != nil {
+		return fmt.Errorf("store.RemoveScene: %w", err)
+	}
+
+	return nil
 }

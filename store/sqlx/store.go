@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+
 	"github.com/jmoiron/sqlx"
+
 	"github.com/themgmd/scenario"
 	"github.com/themgmd/scenario/store/pkg"
-	"log/slog"
 )
 
 // Storage .
@@ -26,6 +28,7 @@ func (s *Storage) ensureTable(ctx context.Context) error {
 	return err
 }
 
+// GetSession .
 func (s *Storage) GetSession(ctx context.Context, chatID, userID int64) *scenario.Session {
 	err := s.ensureTable(ctx)
 	if err != nil {
@@ -34,7 +37,7 @@ func (s *Storage) GetSession(ctx context.Context, chatID, userID int64) *scenari
 	}
 
 	var payload []byte
-	query := fmt.Sprintf(pkg.SqlGetSessionQuery, pkg.SqlEnsureTableQuery)
+	query := fmt.Sprintf(pkg.SqlGetSessionQuery, pkg.SqlTableName)
 
 	err = s.db.GetContext(ctx, &payload, query, chatID, userID)
 	if err != nil {
@@ -52,75 +55,24 @@ func (s *Storage) GetSession(ctx context.Context, chatID, userID int64) *scenari
 	return &session
 }
 
-func (s *Storage) SetSession(ctx context.Context, chatID, userID int64, sess *scenario.Session) {
+// SetSession .
+func (s *Storage) SetSession(ctx context.Context, sess *scenario.Session) {
 	err := s.ensureTable(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to ensure table: %v", err)
 		return
 	}
 
-	payload, err := json.Marshal(sess)
+	payload, err := json.Marshal(sess.Data)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to marshal session: %v", err)
 		return
 	}
 
 	query := fmt.Sprintf(pkg.SqlUpsertSessionQuery, pkg.SqlTableName)
-	_, err = s.db.ExecContext(ctx, query, chatID, userID, payload)
+	_, err = s.db.ExecContext(ctx, query, sess.ChatID, sess.UserID, payload, sess.Scene, sess.Step)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to upsert session: %v", err)
-		return
-	}
-
-	return
-}
-
-func (s *Storage) SetScene(ctx context.Context, chatID, userID int64, name string) {
-	err := s.ensureTable(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to ensure table: %v", err)
-		return
-	}
-
-	query := fmt.Sprintf(pkg.SqlUpsertSceneQuery, pkg.SqlTableName)
-	_, err = s.db.ExecContext(ctx, query, chatID, userID, name)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to upsert scene: %v", err)
-		return
-	}
-
-	return
-}
-
-func (s *Storage) GetScene(ctx context.Context, chatID, userID int64) string {
-	err := s.ensureTable(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to ensure table: %v", err)
-		return ""
-	}
-
-	var scene string
-	query := fmt.Sprintf(pkg.SqlGetSceneQuery, pkg.SqlTableName)
-	err = s.db.GetContext(ctx, &scene, query, chatID, userID)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to get scene: %v", err)
-		return ""
-	}
-
-	return scene
-}
-
-func (s *Storage) RemoveScene(ctx context.Context, chatID, userID int64) {
-	err := s.ensureTable(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to ensure table: %v", err)
-		return
-	}
-
-	query := fmt.Sprintf(pkg.SqlRemoveSceneQuery, pkg.SqlTableName)
-	_, err = s.db.ExecContext(ctx, query, chatID, userID)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to remove scene: %v", err)
 		return
 	}
 

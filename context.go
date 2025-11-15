@@ -2,67 +2,84 @@ package scenario
 
 import (
 	"context"
-	tele "gopkg.in/telebot.v3"
+	"fmt"
+	"log/slog"
 	"time"
+
+	tele "gopkg.in/telebot.v3"
 )
 
 // Session is per-user (and optionally per-chat) state persisted between updates.
 type Session struct {
-	Step int
-	Data map[string]interface{}
+	ChatID  int64          `json:"chat_id" db:"chat_id"`
+	UserID  int64          `json:"user_id" db:"user_id"`
+	Scene   SceneName      `json:"scene" db:"scene"`
+	Step    int            `json:"step" db:"step"`
+	Data    map[string]any `json:"data" db:"data"`
+	Updated time.Time      `json:"updated" db:"updated"`
 }
 
-// Ctx wraps tele.Context and carries scene/session helpers.
-type Ctx struct {
+// Context wraps tele.Context and carries scene/session helpers.
+type Context struct {
 	tele.Context
-	Stage   *Scenario
-	Session *Session
-	// identifiers for storage routing
-	userID int64
-	chatID int64
+	Scenario *Scenario
+	Session  *Session
 }
 
-func newCtx(stage *Scenario, c tele.Context, sess *Session) *Ctx {
-	uid := c.Sender().ID
-	var cid int64
+func newCtx(scenario *Scenario, c tele.Context, sess *Session) *Context {
+	var (
+		cid int64
+		uid = c.Sender().ID
+	)
+
 	if m := c.Message(); m != nil && m.Chat != nil {
 		cid = m.Chat.ID
 	}
-	return &Ctx{Context: c, Stage: stage, Session: sess, userID: uid, chatID: cid}
+
+	sess.ChatID = cid
+	sess.UserID = uid
+	sess.Data = make(map[string]any)
+	return &Context{Context: c, Scenario: scenario, Session: sess}
 }
 
-// NewForStage constructs scene context with existing session loaded from Store.
-func NewForStage(stage *Scenario, c tele.Context) *Ctx {
+// NewContext constructs scene context with existing session loaded from Store.
+func NewContext(scenario *Scenario, c tele.Context) *Context {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var cid int64
+	var (
+		cid int64
+		uid = c.Sender().ID
+	)
 	if m := c.Message(); m != nil && m.Chat != nil {
 		cid = m.Chat.ID
 	}
-	uid := c.Sender().ID
-	sess := stage.store.GetSession(ctx, cid, uid)
-	return newCtx(stage, c, sess)
+
+	sess, err := scenario.store.GetSession(ctx, cid, uid)
+	if err != nil {
+		slog.ErrorContext(ctx, "NewContext", "failed to get session: %v", err)
+		sess = &Session{}
+	}
+
+	return newCtx(scenario, c, sess)
 }
 
 // Enter helpers
-func (c *Ctx) Enter(scene string, args ...any) error {
-	return c.Stage.enter(c, scene, args...)
+func (c *Context) Enter(scene SceneName) error {
+	return c.Scenario.enter(c, scene)
 }
 
 // Reenter .
-func (c *Ctx) Reenter(ctx context.Context, args ...any) error {
-	cur := c.Stage.currentScene(ctx, c.userID, c.chatID)
-	if cur == "" {
-		return nil
-	}
-	return c.Stage.enter(c, cur, args...)
+func (c *Context) Reenter() error {
+	return c.Scenario.enter(c, c.Session.Scene)
 }
 
 // Leave .
-func (c *Ctx) Leave(ctx context.Context) error {
-	c.Stage.leave(c.userID, c.chatID)
-	// persist session after leave
-	c.Stage.store.SetSession(ctx, c.chatID, c.userID, c.Session)
+func (c *Context) Leave() error {
+	err := c.Scenario.leave(c)
+	if err != nil {
+		return fmt.Errorf("c.Scenario.leave: %w", err)
+	}
+
 	return nil
 }
