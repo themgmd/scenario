@@ -12,18 +12,27 @@ import (
 	"github.com/themgmd/scenario"
 )
 
+// UserData represents the data structure for user registration scene.
+type UserData struct {
+	Name string `json:"name"`
+	BD   string `json:"bd"`
+}
+
 type startHandler struct {
 	scenario *scenario.Scenario
 }
 
 func (h *startHandler) Handle(c telebot.Context) error {
-	sceneCtx := scenario.NewContext(h.scenario, c)
+	sceneCtx, err := scenario.NewContext[UserData](h.scenario, c)
+	if err != nil {
+		return err
+	}
 	return sceneCtx.Enter("user_register_scene")
 }
 
 func (h *startHandler) RegisterScene() {
-	wizard := scenario.NewWizard("user_register_scene",
-		func(c *scenario.Context) (bool, error) {
+	wizard := scenario.NewWizard[UserData]("user_register_scene",
+		func(c *scenario.Context[UserData]) (bool, error) {
 			m := c.Message()
 
 			if strings.HasPrefix(m.Text, "/") {
@@ -31,16 +40,20 @@ func (h *startHandler) RegisterScene() {
 			}
 
 			if m != nil && strings.TrimSpace(m.Text) != "" {
-				c.Session.Data["name"] = strings.TrimSpace(m.Text)
+				data := c.GetData()
+				data.Name = strings.TrimSpace(m.Text)
+				c.SetData(data)
 				return true, c.Reply("введите ваше ДР")
 			}
 			return false, c.Reply("Введите ваше имя")
 		},
-		func(c *scenario.Context) (bool, error) {
+		func(c *scenario.Context[UserData]) (bool, error) {
 			m := c.Message()
 
 			if m != nil && strings.TrimSpace(m.Text) != "" {
-				c.Session.Data["bd"] = strings.TrimSpace(m.Text)
+				data := c.GetData()
+				data.BD = strings.TrimSpace(m.Text)
+				c.SetData(data)
 				return true, c.Reply("Спасибо!")
 			}
 			return false, c.Reply("Введите ваше ДР")
