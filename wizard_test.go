@@ -242,3 +242,115 @@ func TestWizardSceneStepError(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, expectedErr, err)
 }
+
+func TestWizardSceneCreateContext(t *testing.T) {
+	type TestData struct {
+		Name  string `json:"name"`
+		Age   int    `json:"age"`
+		Value string `json:"value"`
+	}
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockCtx := mocks.NewMockContext(ctrl)
+	mockCtx.EXPECT().Sender().Return(&tele.User{ID: 1}).AnyTimes()
+	mockCtx.EXPECT().Message().Return(&tele.Message{
+		Chat: &tele.Chat{ID: 2},
+	}).AnyTimes()
+
+	scenario := New(nil)
+	wizard := NewWizard[TestData]("test_wizard")
+
+	base := &SessionBase{
+		ChatID: 2,
+		UserID: 1,
+		Scene:  "test_wizard",
+		Step:   1,
+		Data:   []byte(`{"name":"John","age":30,"value":"test"}`),
+	}
+
+	// Test CreateContext
+	ctx, err := wizard.CreateContext(scenario, mockCtx, base)
+	require.NoError(t, err)
+	assert.NotNil(t, ctx)
+
+	// Verify it's the correct type
+	typedCtx, ok := ctx.(*Context[TestData])
+	require.True(t, ok, "Context should be *Context[TestData]")
+	assert.Equal(t, int64(2), typedCtx.Session.ChatID)
+	assert.Equal(t, int64(1), typedCtx.Session.UserID)
+	assert.Equal(t, SceneName("test_wizard"), typedCtx.Session.Scene)
+	assert.Equal(t, 1, typedCtx.Session.Step)
+	assert.Equal(t, "John", typedCtx.Session.Data.Name)
+	assert.Equal(t, 30, typedCtx.Session.Data.Age)
+	assert.Equal(t, "test", typedCtx.Session.Data.Value)
+}
+
+func TestWizardSceneCreateContextWithEmptyData(t *testing.T) {
+	type TestData struct {
+		Value string `json:"value"`
+	}
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockCtx := mocks.NewMockContext(ctrl)
+	mockCtx.EXPECT().Sender().Return(&tele.User{ID: 1}).AnyTimes()
+	mockCtx.EXPECT().Message().Return(&tele.Message{
+		Chat: &tele.Chat{ID: 2},
+	}).AnyTimes()
+
+	scenario := New(nil)
+	wizard := NewWizard[TestData]("test_wizard")
+
+	base := &SessionBase{
+		ChatID: 2,
+		UserID: 1,
+		Scene:  "test_wizard",
+		Step:   0,
+		Data:   []byte("{}"),
+	}
+
+	ctx, err := wizard.CreateContext(scenario, mockCtx, base)
+	require.NoError(t, err)
+	assert.NotNil(t, ctx)
+
+	typedCtx, ok := ctx.(*Context[TestData])
+	require.True(t, ok)
+	assert.Equal(t, TestData{}, typedCtx.Session.Data)
+}
+
+func TestWizardSceneCreateContextWithNullData(t *testing.T) {
+	type TestData struct {
+		Value string `json:"value"`
+	}
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockCtx := mocks.NewMockContext(ctrl)
+	mockCtx.EXPECT().Sender().Return(&tele.User{ID: 1}).AnyTimes()
+	mockCtx.EXPECT().Message().Return(&tele.Message{
+		Chat: &tele.Chat{ID: 2},
+	}).AnyTimes()
+
+	scenario := New(nil)
+	wizard := NewWizard[TestData]("test_wizard")
+
+	base := &SessionBase{
+		ChatID: 2,
+		UserID: 1,
+		Scene:  "test_wizard",
+		Step:   0,
+		Data:   []byte("null"),
+	}
+
+	ctx, err := wizard.CreateContext(scenario, mockCtx, base)
+	require.NoError(t, err)
+	assert.NotNil(t, ctx)
+
+	typedCtx, ok := ctx.(*Context[TestData])
+	require.True(t, ok)
+	assert.Equal(t, TestData{}, typedCtx.Session.Data)
+}

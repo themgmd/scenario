@@ -293,6 +293,239 @@ func TestScenarioWithStoreNil(t *testing.T) {
 	assert.Equal(t, originalStore, scenario.store) // should not change
 }
 
+func TestCreateTypedContextWithTypedScene(t *testing.T) {
+	type TestData struct {
+		Value string `json:"value"`
+	}
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockCtx := mocks.NewMockContext(ctrl)
+	mockCtx.EXPECT().Sender().Return(&tele.User{ID: 1}).AnyTimes()
+	mockCtx.EXPECT().Message().Return(&tele.Message{
+		Chat: &tele.Chat{ID: 2},
+	}).AnyTimes()
+
+	scenario := New(nil)
+	wizard := NewWizard[TestData]("test_wizard")
+	scenario.Use(wizard)
+
+	base := &SessionBase{
+		ChatID: 2,
+		UserID: 1,
+		Scene:  "test_wizard",
+		Data:   []byte(`{"value":"test"}`),
+	}
+
+	// Test createTypedContext with TypedScene
+	ctx, err := createTypedContext(wizard, scenario, mockCtx, base)
+	require.NoError(t, err)
+	assert.NotNil(t, ctx)
+
+	// Verify it's the correct typed context
+	typedCtx, ok := ctx.(*Context[TestData])
+	require.True(t, ok, "Context should be *Context[TestData]")
+	assert.Equal(t, "test", typedCtx.Session.Data.Value)
+}
+
+func TestCreateTypedContextWithNonTypedScene(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockCtx := mocks.NewMockContext(ctrl)
+	mockCtx.EXPECT().Sender().Return(&tele.User{ID: 1}).AnyTimes()
+	mockCtx.EXPECT().Message().Return(&tele.Message{
+		Chat: &tele.Chat{ID: 2},
+	}).AnyTimes()
+
+	scenario := New(nil)
+	scene := &mockScene{name: "test_scene"}
+
+	base := &SessionBase{
+		ChatID: 2,
+		UserID: 1,
+		Scene:  "test_scene",
+		Data:   []byte(`{"value":"test"}`),
+	}
+
+	// Test createTypedContext with non-TypedScene (should fallback to Context[any])
+	ctx, err := createTypedContext(scene, scenario, mockCtx, base)
+	require.NoError(t, err)
+	assert.NotNil(t, ctx)
+
+	// Verify it's Context[any]
+	typedCtx, ok := ctx.(*Context[any])
+	require.True(t, ok, "Context should be *Context[any] for non-typed scenes")
+	assert.NotNil(t, typedCtx)
+}
+
+func TestScenarioMiddlewareWithTypedScene(t *testing.T) {
+	type TestData struct {
+		Value string `json:"value"`
+	}
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockCtx := mocks.NewMockContext(ctrl)
+	mockCtx.EXPECT().Sender().Return(&tele.User{ID: 1}).AnyTimes()
+	mockCtx.EXPECT().Message().Return(&tele.Message{
+		Chat: &tele.Chat{ID: 2},
+	}).AnyTimes()
+
+	scenario := New(nil)
+	wizard := NewWizard[TestData]("test_wizard",
+		func(c *Context[TestData]) (bool, error) {
+			// Modify data to verify typed context works
+			c.SetData(TestData{Value: "modified"})
+			return false, nil
+		},
+	)
+	scenario.Use(wizard)
+
+	// Create a session with active scene
+	base := &SessionBase{
+		ChatID: 2,
+		UserID: 1,
+		Scene:  "test_wizard",
+		Data:   []byte(`{"value":"initial"}`),
+	}
+	err := scenario.store.SetSession(context.Background(), base)
+	require.NoError(t, err)
+
+	nextCalled := false
+	next := func(c tele.Context) error {
+		nextCalled = true
+		return nil
+	}
+
+	middleware := scenario.Middleware(next)
+	err = middleware(mockCtx)
+	require.NoError(t, err)
+	assert.False(t, nextCalled) // next should not be called
+
+	// Verify session was updated with typed data
+	loadedBase, err := scenario.store.GetSession(context.Background(), 2, 1)
+	require.NoError(t, err)
+	assert.NotNil(t, loadedBase)
+	assert.Contains(t, string(loadedBase.Data), "modified")
+}
+
+func TestScenarioMiddlewareWithTypedSceneTypeSafety(t *testing.T) {
+	type TestData1 struct {
+		Value1 string `json:"value1"`
+	}
+	type TestData2 struct {
+		Value2 int `json:"value2"`
+	}
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockCtx := mocks.NewMockContext(ctrl)
+	mockCtx.EXPECT().Sender().Return(&tele.User{ID: 1}).AnyTimes()
+	mockCtx.EXPECT().Message().Return(&tele.Message{
+		Chat: &tele.Chat{ID: 2},
+	}).AnyTimes()
+
+	scenario := New(nil)
+	wizard := NewWizard[TestData1]("test_wizard",
+		func(c *Context[TestData1]) (bool, error) {
+			// This should work with TestData1
+			c.SetData(TestData1{Value1: "test"})
+			return false, nil
+		},
+	)
+	scenario.Use(wizard)
+
+	// Create a session with data that matches the wizard's type
+	base := &SessionBase{
+		ChatID: 2,
+		UserID: 1,
+		Scene:  "test_wizard",
+		Data:   []byte(`{"value1":"initial"}`),
+	}
+	err := scenario.store.SetSession(context.Background(), base)
+	require.NoError(t, err)
+
+	next := func(c tele.Context) error { return nil }
+	middleware := scenario.Middleware(next)
+	err = middleware(mockCtx)
+	require.NoError(t, err)
+
+	// Verify the context was created with correct type
+	// The middleware should create Context[TestData1], not Context[any]
+	loadedBase, err := scenario.store.GetSession(context.Background(), 2, 1)
+	require.NoError(t, err)
+	assert.NotNil(t, loadedBase)
+	// Data should be valid JSON for TestData1
+	assert.Contains(t, string(loadedBase.Data), "value1")
+}
+
+func TestScenarioEnterPreservesEnterChanges(t *testing.T) {
+	type TestData struct {
+		Value string
+	}
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockCtx := mocks.NewMockContext(ctrl)
+	mockCtx.EXPECT().Sender().Return(&tele.User{ID: 1}).AnyTimes()
+	mockCtx.EXPECT().Message().Return(&tele.Message{
+		Chat: &tele.Chat{ID: 2},
+	}).AnyTimes()
+
+	scenario := New(nil)
+	wizard := NewWizard[TestData]("test_wizard",
+		func(c *Context[TestData]) (bool, error) {
+			// OnUpdate modifies data
+			c.SetData(TestData{Value: "from_onupdate"})
+			return false, nil
+		},
+	)
+	scenario.Use(wizard)
+
+	sess := &Session[TestData]{Data: TestData{Value: "initial"}}
+	context := newCtx(scenario, mockCtx, sess)
+
+	err := scenario.enter(context, "test_wizard")
+	require.NoError(t, err)
+
+	// Verify that Enter changes (Step=0) are preserved
+	assert.Equal(t, 0, context.Session.Step)
+	// Verify that OnUpdate changes are also preserved
+	assert.Equal(t, "from_onupdate", context.Session.Data.Value)
+}
+
+func TestNewContextWithEmptyBase(t *testing.T) {
+	type TestData struct {
+		Value string `json:"value"`
+	}
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockCtx := mocks.NewMockContext(ctrl)
+	mockCtx.EXPECT().Sender().Return(&tele.User{ID: 123}).AnyTimes()
+	mockCtx.EXPECT().Message().Return(&tele.Message{
+		Chat: &tele.Chat{ID: 456},
+	}).AnyTimes()
+
+	scenario := New(nil)
+
+	// Test NewContext when session doesn't exist (should create empty session)
+	ctx, err := NewContext[TestData](scenario, mockCtx)
+	require.NoError(t, err)
+	assert.NotNil(t, ctx)
+
+	// Verify ChatID and UserID are set correctly
+	assert.Equal(t, int64(456), ctx.Session.ChatID)
+	assert.Equal(t, int64(123), ctx.Session.UserID)
+	assert.Equal(t, TestData{}, ctx.Session.Data) // should be zero value
+}
+
 type mockStore struct {
 	sessions map[string]*SessionBase
 }

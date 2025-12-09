@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -159,8 +160,7 @@ func newCtx[T any](scenario *Scenario, c tele.Context, sess *Session[T]) *Contex
 	cid, uid := getChatUserIDs(c)
 	sess.ChatID = cid
 	sess.UserID = uid
-	var zero T
-	sess.Data = zero
+	// Don't overwrite Data - it should already be set from SessionBase
 	return &Context[T]{
 		Context:  c,
 		Scenario: scenario,
@@ -180,8 +180,14 @@ func NewContext[T any](scenario *Scenario, c tele.Context) (*Context[T], error) 
 	cid, uid := getChatUserIDs(c)
 	base, err := scenario.store.GetSession(ctx, cid, uid)
 	if err != nil {
-		slog.ErrorContext(ctx, "NewContext", "failed to get session: %v", err)
-		base = &SessionBase{}
+		if !errors.Is(err, ErrSessionNotFound) {
+			slog.ErrorContext(ctx, "NewContext", "failed to get session: %v", err)
+		}
+		// Create new session with ChatID and UserID set
+		base = &SessionBase{
+			ChatID: cid,
+			UserID: uid,
+		}
 	}
 
 	sess, err := fromBase[T](base)

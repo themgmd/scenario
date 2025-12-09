@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	_ "gopkg.in/telebot.v3"
+	tele "gopkg.in/telebot.v3"
 )
 
 // WizardStep is a step handler returning whether to advance to next step.
@@ -26,6 +26,15 @@ func NewWizard[T any](name SceneName, steps ...WizardStep[T]) *WizardScene[T] {
 
 // Name returns the scene name.
 func (w *WizardScene[T]) Name() SceneName { return w.name }
+
+// CreateContext creates a typed Context[T] from SessionBase.
+func (w *WizardScene[T]) CreateContext(scenario *Scenario, c tele.Context, base *SessionBase) (ContextBase, error) {
+	sess, err := fromBase[T](base)
+	if err != nil {
+		return nil, fmt.Errorf("fromBase[%T]: %w", *new(T), err)
+	}
+	return newCtx(scenario, c, sess), nil
+}
 
 // Enter initializes the wizard by setting step to 0.
 func (w *WizardScene[T]) Enter(c ContextBase) error {

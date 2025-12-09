@@ -28,6 +28,15 @@ type Scene interface {
 	Leave(ContextBase) error
 }
 
+// TypedScene is a scene that can create a typed context from SessionBase.
+// This allows middleware to create the correct Context[T] type.
+type TypedScene interface {
+	Scene
+	// CreateContext creates a typed Context[T] from SessionBase.
+	// The returned ContextBase should be of type *Context[T] where T matches the scene's data type.
+	CreateContext(scenario *Scenario, c tele.Context, base *SessionBase) (ContextBase, error)
+}
+
 // Scenario routes updates to scenes, stores session and current scene.
 type Scenario struct {
 	bot    *tele.Bot
@@ -57,8 +66,25 @@ func (s *Scenario) Use(sc Scene) *Scenario {
 	return s
 }
 
+// createTypedContext creates a typed Context[T] based on the scene type.
+// If the scene implements TypedScene, it uses CreateContext method.
+// Otherwise, falls back to Context[any].
+func createTypedContext(scene Scene, scenario *Scenario, c tele.Context, base *SessionBase) (ContextBase, error) {
+	// Check if scene implements TypedScene interface
+	if typedScene, ok := scene.(TypedScene); ok {
+		return typedScene.CreateContext(scenario, c, base)
+	}
+
+	// Fallback to Context[any] for non-typed scenes
+	sess, err := fromBase[any](base)
+	if err != nil {
+		return nil, fmt.Errorf("fromBase[any]: %w", err)
+	}
+	return newCtx(scenario, c, sess), nil
+}
+
 // Middleware returns a telebot middleware that injects scene context and dispatches to active scene.
-// This middleware uses Context[any] for type erasure, allowing scenes with different data types.
+// This middleware creates a typed Context[T] based on the scene's type parameter.
 func (s *Scenario) Middleware(next tele.HandlerFunc) tele.HandlerFunc {
 	return func(c tele.Context) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -79,12 +105,11 @@ func (s *Scenario) Middleware(next tele.HandlerFunc) tele.HandlerFunc {
 			return next(c)
 		}
 
-		// Create Context[any] for type erasure
-		sess, err := fromBase[any](base)
+		// Create typed context based on scene type
+		sceneCtx, err := createTypedContext(sc, s, c, base)
 		if err != nil {
-			return fmt.Errorf("fromBase: %w", err)
+			return fmt.Errorf("createTypedContext: %w", err)
 		}
-		sceneCtx := newCtx(s, c, sess)
 
 		// Dispatch to current scene
 		if err = sc.OnUpdate(sceneCtx); err != nil {
