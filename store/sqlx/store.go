@@ -29,11 +29,11 @@ func (s *Storage) ensureTable(ctx context.Context) error {
 }
 
 // GetSession .
-func (s *Storage) GetSession(ctx context.Context, chatID, userID int64) *scenario.Session {
+func (s *Storage) GetSession(ctx context.Context, chatID, userID int64) (*scenario.Session, error) {
 	err := s.ensureTable(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to ensure table: %v", err)
-		return nil
+		return nil, err
 	}
 
 	var payload []byte
@@ -42,39 +42,39 @@ func (s *Storage) GetSession(ctx context.Context, chatID, userID int64) *scenari
 	err = s.db.GetContext(ctx, &payload, query, chatID, userID)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to get session: %v", err)
-		return nil
+		return nil, err
 	}
 
 	var session scenario.Session
 	err = json.Unmarshal(payload, &session)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to unmarshal session: %v", err)
-		return nil
+		return nil, err
 	}
 
-	return &session
+	return &session, nil
 }
 
 // SetSession .
-func (s *Storage) SetSession(ctx context.Context, sess *scenario.Session) {
+func (s *Storage) SetSession(ctx context.Context, sess *scenario.Session) error {
 	err := s.ensureTable(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to ensure table: %v", err)
-		return
+		return err
 	}
 
 	payload, err := json.Marshal(sess.Data)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to marshal session: %v", err)
-		return
+		return err
 	}
 
 	query := fmt.Sprintf(pkg.SqlUpsertSessionQuery, pkg.SqlTableName)
 	_, err = s.db.ExecContext(ctx, query, sess.ChatID, sess.UserID, payload, sess.Scene, sess.Step)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to upsert session: %v", err)
-		return
+		return err
 	}
 
-	return
+	return nil
 }
