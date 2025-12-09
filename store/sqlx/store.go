@@ -21,8 +21,15 @@ type Storage struct {
 }
 
 // NewStorage .
-func NewStorage(db *sqlx.DB) *Storage {
-	return &Storage{db: db}
+func NewStorage(db *sqlx.DB) (*Storage, error) {
+	storage := &Storage{db: db}
+
+	err := storage.ensureTable(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	return storage, nil
 }
 
 func (s *Storage) ensureTable(ctx context.Context) error {
@@ -36,16 +43,10 @@ func (s *Storage) ensureTable(ctx context.Context) error {
 
 // GetSession .
 func (s *Storage) GetSession(ctx context.Context, chatID, userID int64) (*scenario.SessionBase, error) {
-	err := s.ensureTable(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to ensure table", "error", err)
-		return nil, err
-	}
-
 	query := fmt.Sprintf(pkg.SqlGetSessionQuery, pkg.SqlTableName)
 
 	var session scenario.SessionBase
-	err = s.db.GetContext(ctx, &session, query, chatID, userID)
+	err := s.db.GetContext(ctx, &session, query, chatID, userID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, scenario.ErrSessionNotFound
@@ -59,19 +60,13 @@ func (s *Storage) GetSession(ctx context.Context, chatID, userID int64) (*scenar
 
 // SetSession .
 func (s *Storage) SetSession(ctx context.Context, sess *scenario.SessionBase) error {
-	err := s.ensureTable(ctx)
-	if err != nil {
-		slog.ErrorContext(ctx, "failed to ensure table", "error", err)
-		return err
-	}
-
 	payload := sess.Data
 	if payload == nil {
 		payload = []byte("{}")
 	}
 
 	query := fmt.Sprintf(pkg.SqlUpsertSessionQuery, pkg.SqlTableName)
-	_, err = s.db.ExecContext(ctx, query, sess.ChatID, sess.UserID, payload, sess.Scene, sess.Step)
+	_, err := s.db.ExecContext(ctx, query, sess.ChatID, sess.UserID, payload, sess.Scene, sess.Step)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to upsert session", "error", err)
 		return err
