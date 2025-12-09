@@ -31,12 +31,12 @@ func TestMemoryStoreSetSession(t *testing.T) {
 	ctx := context.Background()
 
 	base := &SessionBase{
-		ChatID:  100,
-		UserID:  200,
-		Scene:   "test_scene",
-		Step:    5,
-		Data:    []byte(`{"key":"value"}`),
-		Updated: time.Now(),
+		ChatID:    100,
+		UserID:    200,
+		Scene:     "test_scene",
+		Step:      5,
+		Data:      []byte(`{"key":"value"}`),
+		UpdatedAt: time.Now(),
 	}
 
 	err := store.SetSession(ctx, base)

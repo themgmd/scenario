@@ -14,23 +14,23 @@ import (
 // SessionBase is the base session structure used for storage.
 // It stores Data as json.RawMessage to allow deserialization into different types.
 type SessionBase struct {
-	ChatID  int64           `json:"chat_id" db:"chat_id"`
-	UserID  int64           `json:"user_id" db:"user_id"`
-	Scene   SceneName       `json:"scene" db:"scene"`
-	Step    int             `json:"step" db:"step"`
-	Data    json.RawMessage `json:"data" db:"data"`
-	Updated time.Time       `json:"updated" db:"updated"`
+	ChatID    int64           `json:"chat_id" db:"chat_id"`
+	UserID    int64           `json:"user_id" db:"user_id"`
+	Scene     SceneName       `json:"scene" db:"scene"`
+	Step      int             `json:"step" db:"step"`
+	Data      json.RawMessage `json:"data" db:"data"`
+	UpdatedAt time.Time       `json:"updated_at" db:"updated_at"`
 }
 
 // Session is per-user (and optionally per-chat) state persisted between updates.
 // T is the type of data stored in this session.
 type Session[T any] struct {
-	ChatID  int64     `json:"chat_id" db:"chat_id"`
-	UserID  int64     `json:"user_id" db:"user_id"`
-	Scene   SceneName `json:"scene" db:"scene"`
-	Step    int       `json:"step" db:"step"`
-	Data    T         `json:"data" db:"data"`
-	Updated time.Time `json:"updated" db:"updated"`
+	ChatID    int64     `json:"chat_id" db:"chat_id"`
+	UserID    int64     `json:"user_id" db:"user_id"`
+	Scene     SceneName `json:"scene" db:"scene"`
+	Step      int       `json:"step" db:"step"`
+	Data      T         `json:"data" db:"data"`
+	UpdatedAt time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // toBase converts Session[T] to SessionBase for storage.
@@ -41,12 +41,12 @@ func (s *Session[T]) toBase() (*SessionBase, error) {
 	}
 	now := time.Now()
 	return &SessionBase{
-		ChatID:  s.ChatID,
-		UserID:  s.UserID,
-		Scene:   s.Scene,
-		Step:    s.Step,
-		Data:    data,
-		Updated: now,
+		ChatID:    s.ChatID,
+		UserID:    s.UserID,
+		Scene:     s.Scene,
+		Step:      s.Step,
+		Data:      data,
+		UpdatedAt: now,
 	}, nil
 }
 
@@ -57,7 +57,7 @@ func fromBase[T any](base *SessionBase) (*Session[T], error) {
 	if base == nil {
 		base = &SessionBase{}
 	}
-	
+
 	var data T
 	if len(base.Data) > 0 {
 		// Optimized check: use bytes.Equal to avoid string conversion
@@ -67,14 +67,14 @@ func fromBase[T any](base *SessionBase) (*Session[T], error) {
 			}
 		}
 	}
-	
+
 	return &Session[T]{
-		ChatID:  base.ChatID,
-		UserID:  base.UserID,
-		Scene:   base.Scene,
-		Step:    base.Step,
-		Data:    data,
-		Updated: base.Updated,
+		ChatID:    base.ChatID,
+		UserID:    base.UserID,
+		Scene:     base.Scene,
+		Step:      base.Step,
+		Data:      data,
+		UpdatedAt: base.UpdatedAt,
 	}, nil
 }
 
@@ -105,12 +105,12 @@ type ContextBase interface {
 // T is the type of data stored in the session.
 type Context[T any] struct {
 	tele.Context
-	Scenario    *Scenario
-	Session     *Session[T]
-	dirty       bool          // tracks if session data has been modified
-	cachedBase  *SessionBase // cached SessionBase to avoid repeated conversions
-	chatID      int64        // cached chatID to avoid repeated lookups
-	userID      int64        // cached userID to avoid repeated lookups
+	Scenario   *Scenario
+	Session    *Session[T]
+	dirty      bool         // tracks if session data has been modified
+	cachedBase *SessionBase // cached SessionBase to avoid repeated conversions
+	chatID     int64        // cached chatID to avoid repeated lookups
+	userID     int64        // cached userID to avoid repeated lookups
 }
 
 func (c *Context[T]) getScenario() *Scenario {
@@ -122,7 +122,7 @@ func (c *Context[T]) getSessionBase() (*SessionBase, error) {
 	if c.cachedBase != nil && !c.dirty {
 		return c.cachedBase, nil
 	}
-	
+
 	base, err := c.Session.toBase()
 	if err != nil {
 		return nil, err

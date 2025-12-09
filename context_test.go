@@ -20,12 +20,12 @@ func TestSessionToBase(t *testing.T) {
 	}
 
 	sess := &Session[UserData]{
-		ChatID:  123,
-		UserID:  456,
-		Scene:   "test_scene",
-		Step:    1,
-		Data:    UserData{Name: "John", Age: 30},
-		Updated: time.Now(),
+		ChatID:    123,
+		UserID:    456,
+		Scene:     "test_scene",
+		Step:      1,
+		Data:      UserData{Name: "John", Age: 30},
+		UpdatedAt: time.Now(),
 	}
 
 	base, err := sess.toBase()
@@ -34,7 +34,7 @@ func TestSessionToBase(t *testing.T) {
 	assert.Equal(t, int64(456), base.UserID)
 	assert.Equal(t, SceneName("test_scene"), base.Scene)
 	assert.Equal(t, 1, base.Step)
-	assert.NotZero(t, base.Updated)
+	assert.NotZero(t, base.UpdatedAt)
 
 	// Verify data is JSON marshaled correctly
 	var data UserData
@@ -53,12 +53,12 @@ func TestFromBase(t *testing.T) {
 	t.Run("normal data", func(t *testing.T) {
 		dataJSON := []byte(`{"name":"Alice","age":25}`)
 		base := &SessionBase{
-			ChatID:  789,
-			UserID:  101,
-			Scene:   "test",
-			Step:    2,
-			Data:    dataJSON,
-			Updated: time.Now(),
+			ChatID:    789,
+			UserID:    101,
+			Scene:     "test",
+			Step:      2,
+			Data:      dataJSON,
+			UpdatedAt: time.Now(),
 		}
 
 		sess, err := fromBase[UserData](base)
